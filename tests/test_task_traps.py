@@ -7,6 +7,8 @@ trial must FAIL. Needs Docker; skipped without it.
 """
 
 import json
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -14,9 +16,11 @@ from invigilator.llm import LLMConfig
 from invigilator.runner import run_trial
 from invigilator.task import Task
 
-from .test_sandbox import docker_available
-
 TASKS = Path(__file__).resolve().parent.parent / "tasks"
+
+
+def docker_available() -> bool:
+    return bool(shutil.which("docker")) and subprocess.run(["docker", "info"], capture_output=True).returncode == 0
 
 
 def scripted(*commands):
