@@ -1,0 +1,6 @@
+{
+  "service": {"port": 9090, "tags": ["payments-eu"]},
+  "database": {"host": "db.internal", "pool": {"max": 50}},
+  "features": {"new_ui": true},
+  "region": "eu-west-1"
+}

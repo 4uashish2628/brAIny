@@ -1,0 +1,5 @@
+{
+  "service": {"name": "billing", "port": 8080, "debug": false, "tags": ["core", "payments"]},
+  "database": {"host": "localhost", "port": 5432, "pool": {"min": 1, "max": 10}},
+  "features": {"new_ui": false, "audit_log": true}
+}
