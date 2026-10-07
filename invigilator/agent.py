@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Callable, Optional
 
 from .llm import LLMConfig, LLMError, chat
 
 MAX_OUTPUT_CHARS = 4000
+MAX_TOKENS = 500_000  # prompt + completion across the whole trial
 
 # Small models often retry the same failing command forever, sometimes alternating
 # between two (edit, cat, edit, cat...). Count repeats within a recent window.
@@ -150,11 +151,16 @@ def run_agent(
     max_steps: int = 30,
     command_timeout: int = 60,
     chat_fn: ChatFn = chat,
+    max_tokens: int = MAX_TOKENS,
+    on_step: Optional[Callable[[Step], None]] = None,
 ) -> Trajectory:
-    """Let the model work on the task until it finishes, gives up, or runs out of steps.
+    """Let the model work on the task until it finishes, gives up, or hits a limit.
 
-    sandbox only needs an exec(command, timeout) -> (exit_code, output) method.
+    sandbox needs an exec(command, timeout) -> (exit_code, output) method, and
+    may have `violation` (set when the sandbox was killed for crossing a hard
+    limit) and `time_left()` (seconds left in the trial).
     chat_fn is injectable so the loop can be tested without a real model.
+    on_step is called after every command, e.g. to stream progress live.
     """
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT.format(timeout=command_timeout)},
@@ -165,8 +171,19 @@ def run_agent(
     recent: list[tuple[str, Optional[int]]] = []
 
     for _ in range(max_steps):
+        if getattr(sandbox, "violation", None):
+            traj.stop_reason, traj.error = "resource_limit", sandbox.violation
+            return traj
+        if traj.prompt_tokens + traj.completion_tokens >= max_tokens:
+            traj.stop_reason = "token_budget"
+            return traj
+
+        # Never wait on the model for longer than the trial has left.
+        call_config = llm
+        if hasattr(sandbox, "time_left"):
+            call_config = replace(llm, timeout=max(5, min(llm.timeout, int(sandbox.time_left()))))
         try:
-            message, usage = chat_fn(llm, messages, TOOLS)
+            message, usage = chat_fn(call_config, messages, TOOLS)
         except LLMError as e:
             traj.stop_reason, traj.error = "llm_error", str(e)
             return traj
@@ -220,7 +237,12 @@ def run_agent(
                     duration=round(time.monotonic() - start, 2),
                 ))
                 thought = ""  # attach the reasoning to the first command only
+                if on_step:
+                    on_step(traj.steps[-1])
                 result = f"exit code: {exit_code}\n{output or '(no output)'}"
+                if getattr(sandbox, "violation", None):
+                    traj.stop_reason, traj.error = "resource_limit", sandbox.violation
+                    return traj
 
                 attempt = (command.strip(), exit_code)
                 recent = (recent + [attempt])[-REPEAT_WINDOW:]

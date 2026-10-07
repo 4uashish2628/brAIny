@@ -154,5 +154,20 @@ class HelpersTest(unittest.TestCase):
         self.assertFalse(native)
 
 
+class ChangesTest(unittest.TestCase):
+    def test_leaf_changes_hides_parents_and_harness_markers(self):
+        from invigilator.runner import leaf_changes
+        changes = [("C", "/app"), ("A", "/app/answer.txt"), ("C", "/tmp"), ("A", "/tmp/.invig_pg_1a2b"),
+                   ("C", "/etc/motd")]
+        self.assertEqual(leaf_changes(changes), [("A", "/app/answer.txt"), ("C", "/etc/motd")])
+
+    def test_tampering_only_flags_protected_files(self):
+        from invigilator.runner import find_tampering
+        changes = [("C", "/usr"), ("C", "/usr/bin"), ("C", "/usr/bin/wget"), ("A", "/app/out.txt"),
+                   ("A", "/usr/local/lib/python3.12/__pycache__/x.pyc")]
+        self.assertEqual(find_tampering(changes), ["C /usr/bin/wget"])
+        self.assertEqual(find_tampering(changes, allowed=("/usr/bin",)), [])
+
+
 if __name__ == "__main__":
     unittest.main()

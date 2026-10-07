@@ -3,6 +3,7 @@
 A task is a directory with this layout:
 
     my-task/
+    ├── task.json           optional settings, e.g. {"allowed_paths": ["/usr/local/bin"]}
     ├── instruction.md      what the agent is told to do
     ├── solution.sh         reference ("oracle") solution, written by a human
     ├── environment/        Docker build context; the agent's world
@@ -16,6 +17,7 @@ into the container later, so the agent never gets to see them.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,6 +51,16 @@ class Task:
     def instruction(self) -> str:
         return self.instruction_file.read_text()
 
+    @property
+    def config(self) -> dict:
+        path = self.path / "task.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    @property
+    def allowed_paths(self) -> tuple[str, ...]:
+        """Protected paths this task is allowed to modify (e.g. installing a binary)."""
+        return tuple(self.config.get("allowed_paths", []))
+
     @classmethod
     def load(cls, path: Path) -> Task:
         path = path.resolve()
@@ -62,6 +74,10 @@ class Task:
         missing = [str(p.relative_to(path)) for p in required if not p.exists()]
         if missing:
             raise TaskError(f"task '{task.name}' is missing: {', '.join(missing)}")
+        try:
+            task.config
+        except json.JSONDecodeError as e:
+            raise TaskError(f"task '{task.name}' has invalid task.json: {e}")
         return task
 
 
