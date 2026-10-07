@@ -1,0 +1,6 @@
+# Only needed for `invigilator serve` / `invigilator worker`. The CLI harness itself has no dependencies.
+fastapi>=0.110
+uvicorn>=0.29
+redis>=5.0
+psycopg[binary]>=3.1
+httpx2  # for FastAPI's TestClient in tests
