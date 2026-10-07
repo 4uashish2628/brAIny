@@ -1,5 +1,7 @@
 # Invigilator
 
+[![CI](https://github.com/4uashish2628/brAIny/actions/workflows/ci.yml/badge.svg)](https://github.com/4uashish2628/brAIny/actions/workflows/ci.yml)
+
 A sandboxed evaluation harness for AI coding agents. It runs agents on real
 terminal tasks inside isolated, resource-capped Docker containers, grades them
 with automated verifiers, catches agents that cheat, and checks that the tasks
@@ -9,6 +11,47 @@ Benchmarks are only as good as their verifiers. A verifier that rejects the
 correct fix, passes an untouched environment, gives different answers on
 different runs, or can be fooled by an agent produces misleading scores.
 Invigilator checks for all of these automatically.
+
+![Trajectory replay: the agent's first attempt fails, it finds the deleting commit in git log, and restores the file](docs/replay.gif)
+
+## Results
+
+A local 7B model, `qwen2.5-coder:7b` on Ollama, on all 11 tasks with 3 trials
+each (33 sandboxed trials, 2 at a time, 17 minutes wall clock):
+
+| Task | Passed | What it tests |
+|---|---|---|
+| write-greeting | 3/3 | sanity check |
+| count-lines | 2/3 | output format (`wc -l file` also prints the file name) |
+| free-port-9000 | 2/3 | find and stop the process holding a port, start a service |
+| git-restore-file | 1/3 | restore a deleted file without rewriting history |
+| stop-log-flood | 1/3 | a log flooder restarted by a supervisor loop |
+| user-permissions | 1/3 | service user, ownership, directory vs file modes |
+| fix-csv-report | 0/3 | fix a crashing script; tested on a hidden CSV |
+| fix-backup-script | 0/3 | shell quoting; hidden paths with spaces and an empty glob |
+| json-config-merge | 0/3 | deep merge vs. shallow merge |
+| nginx-serve-8080 | 0/3 | configure and start nginx with no network |
+| sqlite-top-customer | 0/3 | SQL with refunds, other years and quantities as traps |
+| **Total** | **10/33 (30%)** | |
+
+What the harness caught:
+
+- **False success claims.** The agent called `finish` in 25 trials; 15 of
+  those (60%) had not solved the task. Only the verifiers caught it.
+- **Near-miss traps working on a real model**: `chmod 640` applied to
+  directories, a backup script still breaking on paths with spaces, and
+  `wc -l` output (which includes the file name) written as the answer.
+- **Damaging "fixes".** In one `stop-log-flood` trial the agent emptied the
+  flooding log by first appending all of it to `audit.log`, the one file it was
+  told to leave alone, and never stopped the writer. In another it tried
+  `systemctl` (which doesn't exist in a container), then reported success.
+- **Stuck agents.** Loop detection ended 6 trials that kept retrying the same
+  failing commands.
+- No tampering and no resource-limit hits in this run.
+
+Each task's verifier is checked first: the reference solution passes 3/3 times,
+the untouched environment fails, and a plausible wrong solution for each trap
+is rejected ([tests/test_task_traps.py](tests/test_task_traps.py)).
 
 ## Quick start
 
@@ -22,9 +65,10 @@ python3 -m invigilator cleanup                      # remove leftover sandboxes
 ```
 
 ```
-TASK            PASSED   RATE   STEPS  TIME    TAMPER  LIMIT
-count-lines     1/3      33%    1.0    8.7     0       0
-write-greeting  3/3      100%   1.0    5.4     0       0
+TASK              PASSED   RATE   STEPS  TIME    TAMPER  LIMIT
+count-lines       2/3      67%    2.0    11.8    0       0
+git-restore-file  1/3      33%    4.3    22.3    0       0
+stop-log-flood    1/3      33%    7.0    29.1    0       0
 ```
 
 Every trial's full trajectory (each command, its output, exit code and timing,
@@ -41,6 +85,8 @@ export INVIG_BASE_URL=https://openrouter.ai/api/v1 INVIG_API_KEY=... INVIG_MODEL
 For bigger evaluations there's a web layer: an API that queues trials, workers
 that run them, and a dashboard that shows results live and replays every trial
 step by step.
+
+![Run overview](docs/run.png)
 
 ```
 Dashboard (React) ──HTTP──► FastAPI ──► PostgreSQL     runs, trials, full trajectories
@@ -156,9 +202,12 @@ python3 -m unittest discover tests          # sandbox tests need Docker
 .venv/bin/python -m unittest discover tests # + API/queue/worker tests (need docker compose up)
 ```
 
-35 tests: agent loop, adversarial sandbox tests, cheating agents, and the API,
-queue and worker against real Postgres and Redis (using a separate test
-database).
+42 tests: agent loop, adversarial sandbox tests, cheating agents, near-miss
+solutions for every task trap, and the API, queue and worker against real
+Postgres and Redis (using a separate test database). CI runs all of them, the
+core tests on Python 3.9, and the dashboard lint and build.
+
+To regenerate the screenshots in `docs/`, see [scripts/screenshots.py](scripts/screenshots.py).
 
 ## Roadmap
 
@@ -170,4 +219,5 @@ database).
 - [x] Hardened sandbox with resource limits and adversarial tests
 - [x] API, reliable job queue, workers with crash recovery
 - [x] Dashboard with live updates and trajectory replay
-- [ ] Benchmark a hosted model on harder tasks and publish the numbers
+- [x] Benchmark a local model and publish the numbers
+- [ ] Benchmark hosted models and compare
