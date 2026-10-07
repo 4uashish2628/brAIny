@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  harness:
+    name: Harness, sandbox and server tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: invig
+          POSTGRES_PASSWORD: invig
+          POSTGRES_DB: invigilator
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U invig" --health-interval 2s --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-server.txt
+      - name: Task verifiers are sound
+        run: python -m invigilator check tasks/ --parallel 2
+      - name: Tests
+        run: python -m unittest discover tests -v
+
+  core-py39:
+    name: Core harness on Python 3.9 (no dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m unittest tests.test_agent -v
+
+  dashboard:
+    name: Dashboard lint and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
